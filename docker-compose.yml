@@ -1,40 +1,36 @@
-version: "3.8"
-
 services:
   products-api:
     build: .
-    container_name: products-api
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3000}:3000"
     environment:
-      - PORT=3000
-      - DB_HOST=products-db
-      - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - DB_NAME=products_db
+      PORT: 3000
+      DB_HOST: products-db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: products_db
     depends_on:
-      - products-db
+      products-db:
+        condition: service_healthy
+    restart: unless-stopped
 
   products-db:
-    image: postgres:16
-    container_name: products-db
+    image: postgres:16-alpine
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=products_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: products_db
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - products_data:/var/lib/postgresql/data
-      - ./db-init.sql:/docker-entrypoint-initdb.d/db-init.sql
+      - ./db-init.sql:/docker-entrypoint-initdb.d/db-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d products_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
 volumes:
   products_data:
-
-
-
-
-#products-api:
- # image: TUUSUARIO/products-api:1.0
-  # en lugar de build: .
