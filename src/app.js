@@ -1,32 +1,91 @@
 const express = require("express");
-const { Pool } = require("pg");
+const { validarProducto } = require("./productos");
 
-const app = express();
-app.use(express.json());
+/** Crea la app de Express sobre un repositorio (Postgres en producción, memoria en las pruebas). */
+function crearApp(repo) {
+  const app = express();
+  app.use(express.json());
 
-const pool = new Pool({
-  host: process.env.DB_HOST || "localhost",
-  port: process.env.DB_PORT || 5432,
-  user: process.env.DB_USER || "postgres",
-  password: process.env.DB_PASSWORD || "postgres",
-  database: process.env.DB_NAME || "products_db"
-});
+  // Los errores de las rutas async llegan al manejador del final.
+  const ruta = (fn) => (req, res, next) => fn(req, res).catch(next);
 
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", service: "products-microservice" });
-});
+  const leerId = (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ error: "El id debe ser un entero positivo." });
+      return null;
+    }
+    return id;
+  };
 
-app.get("/products", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT id, name, price FROM products;");
-    res.json(result.rows);
-  } catch (err) {
-    console.error("Error querying products:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+  app.get(
+    "/health",
+    ruta(async (req, res) => {
+      try {
+        await repo.disponible();
+        res.json({ status: "ok", service: "products-microservice", database: "ok" });
+      } catch {
+        res.status(503).json({ status: "degraded", service: "products-microservice", database: "unavailable" });
+      }
+    }),
+  );
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Products microservice running on port ${PORT}`);
-});
+  app.get("/products", ruta(async (req, res) => res.json(await repo.listar())));
+
+  app.get(
+    "/products/:id",
+    ruta(async (req, res) => {
+      const id = leerId(req, res);
+      if (id === null) return;
+      const producto = await repo.buscar(id);
+      if (!producto) return res.status(404).json({ error: `No existe el producto ${id}.` });
+      res.json(producto);
+    }),
+  );
+
+  app.post(
+    "/products",
+    ruta(async (req, res) => {
+      const { producto, errores } = validarProducto(req.body);
+      if (Object.keys(errores).length) return res.status(400).json({ errors: errores });
+      const creado = await repo.crear(producto);
+      res.status(201).location(`/products/${creado.id}`).json(creado);
+    }),
+  );
+
+  app.put(
+    "/products/:id",
+    ruta(async (req, res) => {
+      const id = leerId(req, res);
+      if (id === null) return;
+      const { producto, errores } = validarProducto(req.body);
+      if (Object.keys(errores).length) return res.status(400).json({ errors: errores });
+      const actualizado = await repo.actualizar(id, producto);
+      if (!actualizado) return res.status(404).json({ error: `No existe el producto ${id}.` });
+      res.json(actualizado);
+    }),
+  );
+
+  app.delete(
+    "/products/:id",
+    ruta(async (req, res) => {
+      const id = leerId(req, res);
+      if (id === null) return;
+      if (!(await repo.eliminar(id))) return res.status(404).json({ error: `No existe el producto ${id}.` });
+      res.status(204).end();
+    }),
+  );
+
+  app.use((req, res) => res.status(404).json({ error: "Ruta no encontrada." }));
+
+  // JSON mal formado y errores inesperados (por ejemplo, la base caída).
+  app.use((err, req, res, next) => {
+    if (err.type === "entity.parse.failed") return res.status(400).json({ error: "El cuerpo no es un JSON válido." });
+    console.error("Error en", req.method, req.path, err);
+    res.status(500).json({ error: "Error interno del servidor." });
+  });
+
+  return app;
+}
+
+module.exports = { crearApp };
