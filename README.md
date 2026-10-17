@@ -1,168 +1,83 @@
-#  Microservicio de Productos — Docker Compose
+# docker-compose-productos-api
 
-Este repositorio contiene un microservicio sencillo en Node.js (Express) que sirve información de productos y usa PostgreSQL como almacenamiento. Todo está orquestado con Docker Compose para facilitar la ejecución local.
+[![CI](https://github.com/Whiteherobot/docker-compose-productos-api/actions/workflows/ci.yml/badge.svg)](https://github.com/Whiteherobot/docker-compose-productos-api/actions/workflows/ci.yml)
 
-## Índice
+Microservicio de productos en Node.js (Express) con PostgreSQL, levantado con
+Docker Compose. Práctica de Sistemas Distribuidos (noviembre de 2025).
 
-- Requisitos
-- Levantar el proyecto (Docker Compose)
-- Endpoints disponibles
-- Acceder a la base de datos
-- Usar una imagen desde Docker Hub (opcional)
-- Detener y limpiar
-- Estructura del proyecto
+## Levantar
 
-
----
-
-## Requisitos
-
-Antes de ejecutar el proyecto necesitas:
-
-- Docker Desktop (o Docker Engine)
-- Docker Compose (incluido en Docker Desktop moderno)
-- (Opcional) Git para clonar el repo
-
----
-
-## Levantar el proyecto (rápido)
-
-1. Clona el repositorio (si aplica):
-
-```powershell
-git clone https://github.com/tu_usuario/microservice-example.git
-cd microservice-example
-```
-
-2. Levanta los servicios con Docker Compose:
-
-```powershell
+```bash
 docker compose up --build
 ```
 
-Esto construirá la imagen del servicio y levantará dos contenedores principales:
-
-- products-api — puerto 3000 (microservicio Node.js)
-- products-db — puerto 5432 (PostgreSQL con inicialización)
-
-En los logs verás una línea similar a:
-
-> Products microservice running on port 3000
-
----
-
-## Endpoints disponibles
-
-- Comprobar que el servicio está arriba:
-
-```http
-GET http://localhost:3000/health
-```
-
-- Listar productos:
-
-```http
-GET http://localhost:3000/products
-```
-
-Si quieres probar con curl / PowerShell (ejemplo PowerShell):
-
-```powershell
-Invoke-RestMethod -Method GET http://localhost:3000/health
-Invoke-RestMethod -Method GET http://localhost:3000/products
-```
-
----
-
-## Acceder a la base de datos (psql)
-
-1. Entrar al contenedor de PostgreSQL:
-
-```powershell
-docker exec -it products-db bash
-```
-
-2. Abrir psql dentro del contenedor:
+La base arranca con tres productos (`db-init.sql`) y la API espera a que
+Postgres acepte conexiones antes de iniciar. Queda en `http://localhost:3000`.
+Si los puertos 3000 o 5432 están ocupados:
 
 ```bash
-psql -U postgres -d products_db
+API_PORT=3310 DB_PORT=55432 docker compose up --build
 ```
 
-3. Comandos útiles dentro de psql:
+Para detener: `docker compose down` (con `-v` se borra también la base).
 
-- Ver tablas:
+## Endpoints
 
-```sql
-\dt
-```
-
-- Ver datos:
-
-```sql
-SELECT * FROM products;
-```
-
-- Salir de psql:
-
-```sql
-\q
-```
-
-- Salir del contenedor:
+| Método | Ruta | Respuesta |
+|---|---|---|
+| GET | `/health` | Estado del servicio y de la base (503 si la base no responde). |
+| GET | `/products` | Todos los productos. |
+| GET | `/products/{id}` | Un producto, o 404. |
+| POST | `/products` | Crea; responde 201 con `Location`. |
+| PUT | `/products/{id}` | Reemplaza nombre y precio. |
+| DELETE | `/products/{id}` | Borra (204). |
 
 ```bash
-exit
+curl -X POST http://localhost:3000/products \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "Webcam HD", "price": 45.9}'
 ```
 
----
+El nombre va de 2 a 100 caracteres y el precio es un número mayor que 0 con
+hasta dos decimales. Los errores salen en JSON: `400 {"errors": {"price": "..."}}`,
+`404 {"error": "No existe el producto 9."}`.
 
-##  Usar la imagen desde Docker Hub (opcional)
+Para ver la base desde la terminal:
 
-En caso de querrer usar la imagen en Docker Hub en lugar de construir localmente, edita `docker-compose.yml` para apuntar a tu imagen:
-
-```yaml
-services:
-  products-api:
-    image: TUUSUARIO/products-api:1.0
+```bash
+docker compose exec products-db psql -U postgres -d products_db -c 'SELECT * FROM products;'
 ```
 
-Luego levanta con:
+## Pruebas
 
-```powershell
-docker compose up
+```bash
+npm install
+npm test                 # la API con un repositorio en memoria
+scripts/probar.sh        # prueba de humo contra los contenedores levantados
 ```
 
----
+La CI corre las dos: las pruebas unitarias y, después, `docker compose up --wait`
+seguido de la prueba de humo.
 
-## Detener y limpiar
-
-- Para detener los servicios cuando están en primer plano: pulsa Ctrl + C
-- Para detener y eliminar contenedores, redes y volúmenes creados por compose:
-
-```powershell
-docker compose down
-```
-
-Para eliminar también los volúmenes (p. ej. para reiniciar la DB desde cero):
-
-```powershell
-docker compose down -v
-```
-
----
-
-## Estructura del proyecto
+## Estructura
 
 ```
-microservice-example/
-├── src/
-│   └── app.js         # servidor Express
-├── db-init.sql        # script para inicializar la BD
-├── Dockerfile         # imagen para products-api
-├── docker-compose.yml
-├── package.json
-└── README.md
+src/
+  servidor.js         arranque, conexión a Postgres y cierre con SIGTERM
+  app.js              rutas de Express (recibe el repositorio)
+  repositorio-pg.js   consultas a PostgreSQL
+  productos.js        validación
+db-init.sql           tabla y datos iniciales
+Dockerfile            imagen de la API (npm ci, usuario node, healthcheck)
+docker-compose.yml    API + PostgreSQL 16 con healthcheck
 ```
 
+## De dónde sale
 
+La práctica levantaba la API y la base con Compose y solo tenía
+`GET /products`. En 2026 se completó el CRUD con validación, se corrigió que la
+API arrancara antes de que Postgres aceptara conexiones y que el precio saliera
+como texto, la imagen pasó a instalar con `npm ci` y a correr sin privilegios, y
+se agregaron pruebas y CI. El repo se llamaba `PracticaDockerComposeMicroserv`.
 
+Licencia MIT.
